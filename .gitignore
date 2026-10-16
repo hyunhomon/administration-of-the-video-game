@@ -1,0 +1,41 @@
+# Dependencies and builds
+node_modules/
+.bun/
+dist/
+build/
+.next/
+.nuxt/
+coverage/
+.cache/
+.tmp/
+*.tsbuildinfo
+
+# Secrets and configuration
+.env
+.env.*
+!.env.example
+!config/.env.example
+*.pem
+*.key
+*service-account*.json
+credentials.json
+
+# Local/IDE files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.antigravity/cache/
+*.log
+logs/
+
+# Generated assets and local data (add selected final assets explicitly later)
+.generated/
+.temp/
+*.sqlite
+*.sqlite-journal
+
+# Infrastructure secrets
+*.tfstate
+*.tfstate.*
+.terraform/

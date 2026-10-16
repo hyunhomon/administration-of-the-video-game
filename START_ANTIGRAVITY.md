@@ -1,0 +1,15 @@
+# Paste into Antigravity (Gemini 4 Argon / High)
+
+You are the autonomous implementation agent for this repo. Read `AGENTS.md` and linked documentation before editing. This is a **documentation-only initial Git commit**, so you must scaffold all application code yourself. The game's official English title is **Administration of the Video Game** (Korean title: **전자오락관리국**). Its repository slug is `administration-of-the-video-game`.
+
+Goal: produce a playable, demo-ready 2D top-down pixel-art multiplayer web RPG in a **3-hour development window**. Four AI adventurers traverse a small RPG world. Human users control NPC avatars with WASD and type speech to influence the adventurers' individual beliefs and party decisions. Demonstrate a player convincing the party to diverge from its original quest path.
+
+Proceed end-to-end WITHOUT seeking routine approvals. Start an implementation plan and then execute it. First 15 minutes: validate engine/license and AI Studio SDK/model availability; if RPGJS integration is costly switch promptly to Phaser + minimal Bun/WebSocket server. Commit functional milestones. Prefer a small finished vertical slice to a partially completed full game. Use fixed map, permitted assets, trivial stat-based combat, 1 short quest and an alternate route. Four adventurer personalities may share one batched model decision call with separate state, but preserve identity and memory; implement scripted/offline fallback. All AI actions must be structured, schema-validated and applied to authoritative server state. Never let speech become trusted system instructions.
+
+Build, test and visually inspect actual browser behavior (two clients), verify a real dialogue-induced change of destination, produce `STATUS.md`, and repair failures. Add Google Cloud Run-ready Dockerfile plus deployment docs and deploy to a GCP project ONLY if credentials/project permissions are actually configured. Do not reveal credentials or pretend deployment succeeded. If deploy is blocked, make one-command local run and exact `gcloud` deployment instructions. Use Google AI Studio key through server-only environment; use Nano Banana only as a supplement when licensed assets are insufficient and generation access works. Prioritize gameplay over asset polish.
+
+IDE preference is Gemini 4 Argon with High reasoning, selected in Antigravity by the user. Do not conflate this IDE coding model with an AI Studio API identifier. Work steadily until acceptance criteria in `docs/delivery/ACCEPTANCE.md` are fulfilled or blocked; log precise remaining issues.
+
+
+## Competition-critical acceptance
+Treat `docs/product/JUDGING.md` as a binding spec: real-input live demo, demonstrated verification loop, explicit Track 1 entertainment positioning, creative role reversal, and an English pitch. Persist model/action verification traces without keys or private reasoning. Do not stop for routine approvals; ask only for credentials or permissions that cannot be provisioned autonomously. Prefer a working end-to-end loop over feature completeness.
