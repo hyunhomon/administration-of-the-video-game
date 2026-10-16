@@ -64,6 +64,7 @@ export class AuthoritativeGameRoom {
   };
   private visibleEvents: WorldEvent[] = [];
   private traces: VerificationTrace[] = [];
+  private triggeredBanterMilestones: Set<string> = new Set();
 
   private partyTrail: Tile[] = [
     { x: 6, y: 13, zone: 'village' },
@@ -95,6 +96,7 @@ export class AuthoritativeGameRoom {
     this.revision++;
     this.paused = false;
     this.rngSeed = 421337;
+    this.triggeredBanterMilestones.clear();
     this.partyGoal = 'march_to_cave';
     this.partyDestination = { ...GOAL_DESTINATIONS.march_to_cave };
     this.partyRationale =
@@ -323,6 +325,13 @@ export class AuthoritativeGameRoom {
         description: 'Ancient subterranean altar holding the Seal of Oakhaven.',
         inspected: false,
       },
+      {
+        id: 'poi_dawn_shrine',
+        name: 'Dawn Sanctuary Shrine',
+        tile: { x: 3, y: 16, zone: 'village' },
+        description: 'Southern village altar where travelers pray for the Dawn’s protective blessing.',
+        inspected: false,
+      },
     ];
 
     this.inventory = [];
@@ -515,13 +524,26 @@ export class AuthoritativeGameRoom {
       closestAgent.facing = 'right';
     }
 
-    const greeting = `${closestAgent.name} turns toward ${human.name}: "Speak, villager. Our party is currently set to: ${GOAL_LABELS[this.partyGoal]}."`;
+    const trustScore = closestAgent.trust[playerId] ?? 0;
+    const hasVerified = closestAgent.memories.some((m) => m.sourceActorId === playerId && m.verified === true);
+    const hasDisproven = closestAgent.memories.some((m) => m.sourceActorId === playerId && m.verified === false);
+
+    let greeting: string;
+    if (hasVerified || trustScore >= 25) {
+      greeting = `${closestAgent.name} greets ${human.name} warmly (Trust +${trustScore}): "Your counsel proved true, friend! We are currently set to: ${GOAL_LABELS[this.partyGoal]}."`;
+    } else if (hasDisproven || trustScore < 0) {
+      greeting = `${closestAgent.name} eyes ${human.name} warily (Trust ${trustScore}): "Your last rumor led us astray. Speak only verifiable truth! Current objective: ${GOAL_LABELS[this.partyGoal]}."`;
+    } else {
+      greeting = `${closestAgent.name} turns toward ${human.name}: "Speak, villager. My personal aim is to ${closestAgent.personalGoal.toLowerCase()}, and our party is set to: ${GOAL_LABELS[this.partyGoal]}."`;
+    }
+
     closestAgent.lastSpeech = greeting;
     closestAgent.lastSpeechAt = Date.now();
 
     this.logEvent('speech', closestAgent.id, greeting, {
       humanId: playerId,
       distance: bestDist,
+      trust: trustScore,
     });
 
     return {
@@ -594,6 +616,17 @@ export class AuthoritativeGameRoom {
     const nextTrust = Math.max(-100, Math.min(100, prevTrust + envelope.trustDelta));
     addressedAgent.trust[human.id] = nextTrust;
 
+    // Ripple a smaller witness trust delta to party companions who overheard the exchange
+    const companionTrustRipple = Math.round(envelope.trustDelta * 0.4);
+    if (companionTrustRipple !== 0) {
+      for (const peer of this.actors) {
+        if (peer.id !== addressedAgent.id) {
+          const peerPrev = peer.trust[human.id] ?? 0;
+          peer.trust[human.id] = Math.max(-100, Math.min(100, peerPrev + companionTrustRipple));
+        }
+      }
+    }
+
     const addedMemories: Memory[] = [];
     for (const bu of envelope.beliefUpdates) {
       const mem: Memory = {
@@ -664,8 +697,40 @@ export class AuthoritativeGameRoom {
       }
     }
 
-    // Resolve party goal via coordinator decision + quest state constraints
-    let resolvedGoal: PartyGoalId = envelope.coordinatorDecision?.chosenGoal || envelope.goalPreference;
+    // Tally votes to verify consensus or resolve 2-2 split tie-breaks authentically
+    const voteCounts = new Map<PartyGoalId, number>();
+    for (const goal of Object.values(partyVotes)) {
+      voteCounts.set(goal, (voteCounts.get(goal) || 0) + 1);
+    }
+
+    let talliedWinner: PartyGoalId = envelope.coordinatorDecision?.chosenGoal || envelope.goalPreference;
+    let maxVotes = 0;
+    const topGoals: PartyGoalId[] = [];
+    for (const [goal, count] of voteCounts.entries()) {
+      if (count > maxVotes) {
+        maxVotes = count;
+        topGoals.length = 0;
+        topGoals.push(goal);
+      } else if (count === maxVotes) {
+        topGoals.push(goal);
+      }
+    }
+
+    if (topGoals.length === 1) {
+      talliedWinner = topGoals[0];
+    } else if (topGoals.length > 1) {
+      // 2-2 Tiebreak: if coordinatorDecision explicitly chose one of the tied goals, honor it; otherwise warrior breaks tie
+      if (
+        envelope.coordinatorDecision?.chosenGoal &&
+        topGoals.includes(envelope.coordinatorDecision.chosenGoal)
+      ) {
+        talliedWinner = envelope.coordinatorDecision.chosenGoal;
+      } else {
+        talliedWinner = partyVotes.warrior;
+      }
+    }
+
+    let resolvedGoal: PartyGoalId = talliedWinner;
 
     // Authoritative quest constraint gate: cannot re-investigate storehouse if already investigated
     if (resolvedGoal === 'investigate_storehouse' && this.quests.storehouseInvestigated) {
@@ -897,8 +962,66 @@ export class AuthoritativeGameRoom {
         return { valid: true, executedIntent: intent };
       }
 
+      case 'interact': {
+        const targetPoi = intent.targetId
+          ? this.pois.find((p) => p.id === intent.targetId)
+          : this.pois.find((p) => tileDistance(actor.tile, p.tile) <= 3);
+        if (!targetPoi) {
+          return {
+            valid: false,
+            rejectionReason: `POI "${intent.targetId || 'nearby'}" not found`,
+            executedIntent: { type: 'wait', actorId: actor.id, durationMs: 500 },
+          };
+        }
+        if (tileDistance(actor.tile, targetPoi.tile) > 4) {
+          return {
+            valid: false,
+            rejectionReason: `POI "${targetPoi.id}" is out of reach (distance > 4)`,
+            executedIntent: { type: 'wait', actorId: actor.id, durationMs: 500 },
+          };
+        }
+
+        const alreadyInspected = targetPoi.inspected;
+        targetPoi.inspected = true;
+
+        if (targetPoi.id === 'poi_dawn_shrine' && !alreadyInspected) {
+          const priest = this.actors.find((a) => a.role === 'priest') || actor;
+          for (const member of this.actors) {
+            member.stats.def += 1;
+            member.stats.hp = member.stats.maxHp;
+          }
+          priest.lastSpeech =
+            'I invoke the Dawn Sanctuary Shrine! May its golden light mend our wounds and fortify our shields (+1 DEF, full HP)!';
+          priest.lastSpeechAt = Date.now();
+          this.logEvent(
+            'quest_flag',
+            priest.id,
+            `${priest.name} consecrated the ${targetPoi.name}! Party restored to full HP and granted +1 DEF.`,
+            {
+              poiId: targetPoi.id,
+              poiName: targetPoi.name,
+              actorId: actor.id,
+              blessingApplied: true,
+            }
+          );
+        } else {
+          this.logEvent(
+            'speech',
+            actor.id,
+            `${actor.name} inspected ${targetPoi.name}: "${targetPoi.description}"`,
+            {
+              poiId: targetPoi.id,
+              poiName: targetPoi.name,
+              actorId: actor.id,
+            }
+          );
+        }
+
+        this.revision++;
+        return { valid: true, executedIntent: intent };
+      }
+
       case 'talk':
-      case 'interact':
       case 'wait': {
         this.revision++;
         return { valid: true, executedIntent: intent };
@@ -989,7 +1112,70 @@ export class AuthoritativeGameRoom {
         follower.tile = { ...targetTrailTile };
       }
 
+      this.checkTravelBanterMilestones(leader);
+
       this.revision++;
+    }
+  }
+
+  private checkTravelBanterMilestones(leader: AgentState): void {
+    const mage = this.actors.find((a) => a.role === 'mage')!;
+    const thief = this.actors.find((a) => a.role === 'thief')!;
+    const priest = this.actors.find((a) => a.role === 'priest')!;
+
+    if (
+      this.partyGoal === 'investigate_storehouse' &&
+      leader.tile.y <= 5 &&
+      !this.triggeredBanterMilestones.has('storehouse_approach')
+    ) {
+      this.triggeredBanterMilestones.add('storehouse_approach');
+      mage.lastSpeech = 'Look ahead—the Old Storehouse rafters still bear the silver sigil of the Grand Archivist.';
+      mage.lastSpeechAt = Date.now();
+      this.logEvent('speech', 'mage', `Archivist Lyra: "${mage.lastSpeech}"`, {
+        milestone: 'storehouse_approach',
+        partyGoal: this.partyGoal,
+      });
+    } else if (
+      this.partyGoal === 'investigate_marsh' &&
+      leader.tile.y >= 13 &&
+      !this.triggeredBanterMilestones.has('marsh_approach')
+    ) {
+      this.triggeredBanterMilestones.add('marsh_approach');
+      priest.lastSpeech = 'This bog mist feels stagnant and deceptive... Vex, are you sure your nose for gold is not leading us into a snare?';
+      priest.lastSpeechAt = Date.now();
+      this.logEvent('speech', 'priest', `Sister Seraphina: "${priest.lastSpeech}"`, {
+        milestone: 'marsh_approach',
+        partyGoal: this.partyGoal,
+      });
+    } else if (
+      this.partyGoal === 'march_to_cave' &&
+      leader.tile.zone === 'crossroads' &&
+      !this.triggeredBanterMilestones.has('crossroads_entry')
+    ) {
+      this.triggeredBanterMilestones.add('crossroads_entry');
+      thief.lastSpeech = this.quests.storehouseInvestigated
+        ? 'With that Sunsteel Blade gleaming and my Scout Boots laced, any Slime at the crossroads had better step aside!'
+        : 'Keep your eyes peeled on the crossroads brush—moss slimes love to ambush hasty travelers.';
+      thief.lastSpeechAt = Date.now();
+      this.logEvent('speech', 'thief', `Vex Shadowstep: "${thief.lastSpeech}"`, {
+        milestone: 'crossroads_entry',
+        partyGoal: this.partyGoal,
+      });
+    } else if (
+      this.partyGoal === 'march_to_cave' &&
+      leader.tile.x >= 18 &&
+      leader.tile.x <= 20 &&
+      !this.triggeredBanterMilestones.has('bridge_crossing')
+    ) {
+      this.triggeredBanterMilestones.add('bridge_crossing');
+      leader.lastSpeech = this.quests.wardBlessingActive
+        ? 'Hold formation across the stone bridge! With the Sacred Ward active, the Seal Guardian’s obsidian armor will crack!'
+        : 'Steady across the bridge! We face the Cavern without the Sacred Ward—shields high!';
+      leader.lastSpeechAt = Date.now();
+      this.logEvent('speech', 'warrior', `Sir Aldric: "${leader.lastSpeech}"`, {
+        milestone: 'bridge_crossing',
+        partyGoal: this.partyGoal,
+      });
     }
   }
 
@@ -1035,7 +1221,9 @@ export class AuthoritativeGameRoom {
       for (const sourceId of verifiedSources) {
         for (const agent of this.actors) {
           const prev = agent.trust[sourceId] ?? 0;
-          agent.trust[sourceId] = Math.min(100, prev + 25);
+          // If speaker was previously negative, redeem them into positive trust (+20 minimum)
+          const redeemedScore = prev < 0 ? Math.max(20, prev + 45) : Math.min(100, prev + 25);
+          agent.trust[sourceId] = redeemedScore;
         }
       }
 
@@ -1226,9 +1414,46 @@ export class AuthoritativeGameRoom {
 
   /**
    * Deterministic seeded stat-based combat resolver (no separate battle screen; produces detailed combat event log).
+   * Also verifies any unverified human `cave_danger` warnings upon encountering the warned threat!
    */
   public resolveStatCombat(enemy: EnemyState): void {
     if (enemy.defeated) return;
+
+    // Check if the party holds any unverified tactical danger warnings ('cave_danger') from human NPCs
+    const initialLoreSources = new Set(['academy-scroll', 'sanctuary-hymn', 'royal-decree', 'tavern-gossip']);
+    const warningSources = new Set<string>();
+    let hasTacticalForewarning = false;
+    for (const agent of this.actors) {
+      for (const mem of agent.memories) {
+        if (mem.topic === 'cave_danger' && !initialLoreSources.has(mem.sourceActorId)) {
+          hasTacticalForewarning = true;
+          if (mem.verified === null) {
+            mem.verified = true;
+            mem.confidence = 1.0;
+            warningSources.add(mem.sourceActorId);
+          }
+        }
+      }
+    }
+
+    if (warningSources.size > 0) {
+      for (const sourceId of warningSources) {
+        for (const agent of this.actors) {
+          const prev = agent.trust[sourceId] ?? 0;
+          agent.trust[sourceId] = Math.min(100, prev + 20);
+        }
+      }
+      this.logEvent(
+        'verification',
+        'warrior',
+        `VERIFIED TRUE: Villager's tactical danger warning confirmed against ${enemy.name}! Party formation braced (-25% incoming damage) and trust increased (+20).`,
+        {
+          enemyId: enemy.id,
+          verifiedSources: Array.from(warningSources),
+          tacticalForewarning: true,
+        }
+      );
+    }
 
     const roundLogs: string[] = [];
     let enemyHp = enemy.stats.hp;
@@ -1252,9 +1477,10 @@ export class AuthoritativeGameRoom {
         // Enemy counterattacks front-line warrior & random member
         const target = this.actors[round % this.actors.length];
         const wardMitigation = this.quests.wardBlessingActive ? 0.55 : 1.0;
+        const warningMitigation = hasTacticalForewarning ? 0.75 : 1.0;
         const enemyDmg = Math.max(
           2,
-          Math.round((enemy.stats.atk - target.stats.def * 0.5) * wardMitigation)
+          Math.round((enemy.stats.atk - target.stats.def * 0.5) * wardMitigation * warningMitigation)
         );
         target.stats.hp = Math.max(5, target.stats.hp - enemyDmg);
         roundLogs.push(`${enemy.name} struck ${target.name} for ${enemyDmg} dmg`);
@@ -1285,6 +1511,7 @@ export class AuthoritativeGameRoom {
         enemyName: enemy.name,
         rounds: round,
         wardBlessingActive: this.quests.wardBlessingActive,
+        tacticalForewarning: hasTacticalForewarning,
         details: roundLogs,
       }
     );
