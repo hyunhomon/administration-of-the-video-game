@@ -13,7 +13,7 @@ After completing and deploying the initial playable MVP of **Administration of t
 - **Gemini 4 Argon (`gemini-4-argon` + `ThinkingLevel.HIGH`) Reasoning**: Integrated official `@google/genai` SDK ([src/server/geminiOrchestrator.ts](file:///d:/Project/administration-of-the-video-game/src/server/geminiOrchestrator.ts)) with strict Zod-validated structured JSON outputs, per-room call budget (`60`), prompt-injection guardrails, and deterministic persona-aware fallback.
 - **Cloud Run Production Deployment**: Containerized and deployed to Google Cloud Run (`asia-northeast3`) with `/healthz`, `/health`, and `/api/healthz` probes plus an idle-room auto-tick guard to prevent background token drain when zero browsers are connected.
 
-### Milestone 2 — Guardian Tales-Inspired UI/UX Overhaul & Onboarding Polish
+### Milestone 2 — Guardian Tales-Inspired UI/UX Overhaul & Onboarding Polish (`8072bd0`)
 - **Audit of Previous Layout**:
   - The initial layout used a dark 3-column dashboard where the `Verification Loop Inspector`, raw event stream, and API telemetry competed visually with the Phaser 3 canvas.
   - First-time players had to read dense sidebar cards to understand who they were controlling and how to trigger a route change.

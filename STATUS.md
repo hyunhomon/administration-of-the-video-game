@@ -3,7 +3,7 @@
 **Last Updated:** 2026-10-16  
 **Track:** Track 1 — Gemini 4 Argon in Entertainment  
 **Live Cloud Run URL:** https://administration-of-the-video-game-311378246870.asia-northeast3.run.app  
-**GCP Project / Region:** `h2gdm-hack26icn-2683` (`asia-northeast3`)  
+**GCP Project / Region:** `h2gdm-hack26icn-2683` (`asia-northeast3`, revision `administration-of-the-video-game-00004-58w`)  
 
 ---
 
@@ -29,7 +29,7 @@
 - `58bd49f` — Initial full-stack playable MVP: Phaser 3 top-down world, authoritative server engine, 4 Gemini 4 Argon adventurers, verification traces, and automated tests.
 - `f0f642c` — Documented live Cloud Run deployment URL and verification results.
 - `84210e4` — Added `/health` and `/api/healthz` probe aliases and idle-room auto-tick guard (`administration-of-the-video-game-00003-96j`).
-- **Latest Milestone (UI/UX Overhaul & Documentation Refresh)** — Redesigned interface into a Guardian Tales-inspired fantasy RPG presentation shell (`index.html`, `src/client/styles.css`, `src/client/main.ts`, `src/client/gameScene.ts`), expanded Playwright E2E assertions (`scripts/verify-browser-e2e.ts`), added `docs/product/UI_UX.md` and `docs/delivery/ITERATION.md`, and refreshed `README.md`, `STATUS.md`, `docs/product/PRD.md`, `docs/product/GAMEPLAY.md`, and `docs/product/DEMO.md`.
+- `8072bd0` — **Guardian Tales-Inspired UI/UX Overhaul & Documentation Refresh**: Redesigned interface into a Guardian Tales-inspired fantasy RPG presentation shell (`index.html`, `src/client/styles.css`, `src/client/main.ts`, `src/client/gameScene.ts`), expanded Playwright E2E assertions (`scripts/verify-browser-e2e.ts`), added `docs/product/UI_UX.md` and `docs/delivery/ITERATION.md`, and refreshed `README.md`, `STATUS.md`, `docs/product/PRD.md`, `docs/product/GAMEPLAY.md`, and `docs/product/DEMO.md`.
 
 ---
 
