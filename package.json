@@ -1,0 +1,35 @@
+{
+  "name": "administration-of-the-video-game",
+  "version": "0.1.0",
+  "description": "Four AI heroes play an RPG. You are the NPC who changes their quest. (전자오락관리국)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server/index.ts",
+    "build": "vite build && tsc -p tsconfig.server.json",
+    "start": "node dist/server/index.js",
+    "test": "vitest run",
+    "test:e2e": "tsx scripts/verify-browser-e2e.ts",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "generate:assets": "tsx scripts/generate-assets.ts"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "phaser": "^3.87.0",
+    "ws": "^8.18.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.0",
+    "@types/ws": "^8.5.14",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0",
+    "vitest": "^3.0.5"
+  }
+}
