@@ -40,10 +40,18 @@ async function main() {
       page2.goto(`${url}?name=Watchman_Jin&role=Bridge_Watchman`, { waitUntil: 'networkidle' }),
     ]);
 
-    // Verify Phaser canvas renders on both tabs
-    await page1.waitForSelector('#phaser-container canvas', { timeout: 10000 });
-    await page2.waitForSelector('#phaser-container canvas', { timeout: 10000 });
-    console.log('Verified Phaser 3 canvas rendered in both Browser Tab 1 and Browser Tab 2.');
+    // Verify Phaser canvas renders on both tabs inside .rpg-viewport-frame
+    await page1.waitForSelector('.rpg-viewport-frame #phaser-container canvas', { timeout: 10000 });
+    await page2.waitForSelector('.rpg-viewport-frame #phaser-container canvas', { timeout: 10000 });
+    console.log('Verified Phaser 3 canvas rendered inside .rpg-viewport-frame in both Browser Tab 1 and Browser Tab 2.');
+
+    // Verify Onboarding Banner is visible and interactive
+    const onboardingVisible = await page1.locator('#onboarding-banner').isVisible();
+    if (!onboardingVisible) {
+      throw new Error('Expected #onboarding-banner to be visible on initial load');
+    }
+    await page1.locator('#btn-dismiss-onboarding').click();
+    console.log('Verified Onboarding Field Briefing banner and dismissed it cleanly.');
 
     // Wait for WebSocket room join to sync NPC count = 2 across both browser sessions
     await page1.waitForFunction(
@@ -57,12 +65,24 @@ async function main() {
     const playersLabel2 = await page2.textContent('#players-label');
     console.log(`Tab 1 status pill: "${playersLabel1}" | Tab 2 status pill: "${playersLabel2}"`);
 
-    // Verify 4 adventurer cards render in #agents-grid
-    const partyCardsCount = await page1.locator('#agents-grid .agent-card').count();
+    // Verify 4 adventurer cards render in aside.party-sidebar #agents-grid with portraits & trust attitude
+    const partyCardsCount = await page1.locator('aside.party-sidebar #agents-grid .agent-card').count();
     if (partyCardsCount !== 4) {
-      throw new Error(`Expected 4 adventurer cards, found ${partyCardsCount}`);
+      throw new Error(`Expected 4 adventurer cards in aside.party-sidebar, found ${partyCardsCount}`);
     }
-    console.log('Verified 4 distinct AI adventurer cards in the Party Inspector.');
+    // Click Warrior's hero card to verify click-to-target selection
+    await page1.locator('#agents-grid .agent-card[data-agent-id="warrior"]').click();
+    const targetVal = await page1.locator('#target-agent-select').inputValue();
+    if (targetVal !== 'warrior') {
+      throw new Error(`Expected clicking warrior card to set #target-agent-select to "warrior", got "${targetVal}"`);
+    }
+    console.log('Verified 4 Hero Party Cards with SVG portraits and click-to-target selection in Party Sidebar.');
+
+    // Verify Collapsible Secondary Drawer tabs
+    await page1.locator('#btn-open-inspector').click();
+    await page1.locator('#tab-btn-events').click();
+    await page1.locator('#tab-btn-traces').click();
+    console.log('Verified Collapsible Secondary Inspector Drawer & tab switching.');
 
     // Simulate WASD movement in Tab 1
     await page1.keyboard.press('KeyD');

@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import {
   ClassId,
   ClientMessage,
+  PartyGoalId,
   ServerMessage,
   Tile,
   VerificationTrace,
@@ -24,6 +25,64 @@ let latestSnapshot: WorldSnapshot | null = null;
 let worldScene: RpgWorldScene | null = null;
 let previousGoal: string | null = null;
 let previousLevelSum = 4;
+let selectedHeroId: ClassId = 'mage';
+
+const HERO_PORTRAIT_SVGS: Record<ClassId, string> = {
+  warrior: `<svg viewBox="0 0 32 32" width="34" height="34" style="image-rendering:pixelated">
+    <rect x="6" y="4" width="20" height="6" fill="#60a5fa"/>
+    <rect x="14" y="2" width="4" height="5" fill="#ef4444"/>
+    <rect x="8" y="10" width="16" height="10" fill="#fde68a"/>
+    <rect x="10" y="13" width="3" height="3" fill="#0f172a"/>
+    <rect x="19" y="13" width="3" height="3" fill="#0f172a"/>
+    <rect x="6" y="20" width="20" height="10" fill="#2563eb"/>
+    <rect x="12" y="22" width="8" height="6" fill="#f59e0b"/>
+  </svg>`,
+  mage: `<svg viewBox="0 0 32 32" width="34" height="34" style="image-rendering:pixelated">
+    <polygon points="16,2 4,12 28,12" fill="#9333ea"/>
+    <rect x="6" y="10" width="20" height="3" fill="#facc15"/>
+    <rect x="9" y="13" width="14" height="9" fill="#fde68a"/>
+    <rect x="11" y="15" width="3" height="3" fill="#3b0764"/>
+    <rect x="18" y="15" width="3" height="3" fill="#3b0764"/>
+    <rect x="7" y="22" width="18" height="8" fill="#6b21a8"/>
+    <rect x="14" y="23" width="4" height="6" fill="#fde047"/>
+  </svg>`,
+  thief: `<svg viewBox="0 0 32 32" width="34" height="34" style="image-rendering:pixelated">
+    <rect x="7" y="4" width="18" height="8" fill="#047857"/>
+    <rect x="9" y="11" width="14" height="9" fill="#fde68a"/>
+    <rect x="9" y="15" width="14" height="5" fill="#064e3b"/>
+    <rect x="11" y="12" width="3" height="2" fill="#ecfdf5"/>
+    <rect x="18" y="12" width="3" height="2" fill="#ecfdf5"/>
+    <rect x="7" y="20" width="18" height="10" fill="#059669"/>
+    <rect x="13" y="22" width="6" height="4" fill="#a7f3d0"/>
+  </svg>`,
+  priest: `<svg viewBox="0 0 32 32" width="34" height="34" style="image-rendering:pixelated">
+    <rect x="10" y="2" width="12" height="2" fill="#fef08a"/>
+    <rect x="7" y="5" width="18" height="7" fill="#f8fafc"/>
+    <rect x="14" y="6" width="4" height="5" fill="#f59e0b"/>
+    <rect x="9" y="12" width="14" height="8" fill="#fde68a"/>
+    <rect x="11" y="14" width="3" height="3" fill="#1e293b"/>
+    <rect x="18" y="14" width="3" height="3" fill="#1e293b"/>
+    <rect x="7" y="20" width="18" height="10" fill="#f1f5f9"/>
+    <rect x="13" y="21" width="6" height="8" fill="#f59e0b"/>
+  </svg>`,
+};
+
+const GOAL_SHORT_NAMES: Record<PartyGoalId, string> = {
+  march_to_cave: '🌋 March to Cave (26,9)',
+  investigate_storehouse: '🏛️ Inspect Storehouse (5,4)',
+  investigate_marsh: '🌿 Check Marsh (16,4)',
+  defeat_guardian: '⚔️ Defeat Guardian (26,9)',
+  recover_seal: '✨ Recover Ancient Seal (26,12)',
+  celebrate_victory: '🏆 Seal Recovered!',
+};
+
+function getTrustAttitude(trust: number): { label: string; color: string } {
+  if (trust >= 25) return { label: '★ Trusted Ally', color: '#34d399' };
+  if (trust >= 8) return { label: '😊 Receptive', color: '#6ee7b7' };
+  if (trust <= -20) return { label: '⚠️ Distrusted', color: '#f87171' };
+  if (trust < 0) return { label: '🤨 Skeptical', color: '#fca5a5' };
+  return { label: '😐 Neutral', color: '#cbd5e1' };
+}
 
 function sendWsMessage(msg: ClientMessage): void {
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -38,6 +97,8 @@ function connectWebSocket(): void {
 
   ws.addEventListener('open', () => {
     const nameInput = document.getElementById('player-name-input') as HTMLInputElement | null;
+    const params = new URLSearchParams(window.location.search);
+    const roleParam = params.get('role') || 'Village Herbalist';
     sendWsMessage({
       version: '1.0',
       requestId: `join-${Date.now()}`,
@@ -45,6 +106,7 @@ function connectWebSocket(): void {
       type: 'join_room',
       playerId: myPlayerId!,
       playerName: nameInput?.value || 'Mira the Herbalist',
+      roleTitle: roleParam.replace(/_/g, ' '),
     });
   });
 
@@ -70,6 +132,14 @@ function handleServerMessage(msg: ServerMessage): void {
     applySnapshot(msg.snapshot);
   } else if (msg.type === 'dialogue') {
     sound.playSpeech();
+    if (msg.speakerKind === 'agent') {
+      updateDialogueFeedbackBanner(
+        msg.speakerId as ClassId,
+        msg.speakerName,
+        'In-World Hero Response',
+        msg.text
+      );
+    }
   } else if (msg.type === 'agent_decision_summary') {
     renderLatestTraceCausalChain(msg.trace);
     if (msg.trace.routeChanged) {
@@ -80,10 +150,28 @@ function handleServerMessage(msg: ServerMessage): void {
   }
 }
 
+function updateDialogueFeedbackBanner(
+  heroId: ClassId,
+  speakerName: string,
+  tagText: string,
+  speechText: string
+): void {
+  const portraitEl = document.getElementById('feedback-portrait');
+  const nameEl = document.getElementById('feedback-speaker-name');
+  const tagEl = document.getElementById('feedback-speaker-tag');
+  const speechEl = document.getElementById('feedback-speech-text');
+
+  if (portraitEl && HERO_PORTRAIT_SVGS[heroId]) {
+    portraitEl.innerHTML = HERO_PORTRAIT_SVGS[heroId];
+  }
+  if (nameEl) nameEl.textContent = speakerName;
+  if (tagEl) tagEl.textContent = tagText;
+  if (speechEl) speechEl.textContent = `“${speechText}”`;
+}
+
 function applySnapshot(snapshot: WorldSnapshot): void {
   latestSnapshot = snapshot;
 
-  // Check for route change or level up sound cues
   if (previousGoal && previousGoal !== snapshot.partyGoal) {
     sound.playRouteChange();
   }
@@ -116,17 +204,25 @@ function updateHeaderAndHud(snapshot: WorldSnapshot): void {
   const revLabel = document.getElementById('rev-label');
   const routeIndicator = document.getElementById('route-indicator');
   const pauseBtn = document.getElementById('btn-pause');
+  const hudAiBadge = document.getElementById('hud-ai-badge');
+  const hudTraceCount = document.getElementById('hud-trace-count');
+  const diagModelInfo = document.getElementById('diag-model-info');
+  const diagRoomInfo = document.getElementById('diag-room-info');
+
+  const srcTag =
+    snapshot.aiStats.lastSource === 'gemini-4-argon'
+      ? 'LIVE API'
+      : snapshot.aiStats.lastSource === 'offline_fallback'
+      ? 'FALLBACK'
+      : snapshot.aiStats.lastSource === 'security_gate'
+      ? 'SECURITY GATE'
+      : 'READY';
 
   if (modelLabel) {
-    const srcTag =
-      snapshot.aiStats.lastSource === 'gemini-4-argon'
-        ? 'LIVE API'
-        : snapshot.aiStats.lastSource === 'offline_fallback'
-        ? 'FALLBACK'
-        : snapshot.aiStats.lastSource === 'security_gate'
-        ? 'SECURITY GATE'
-        : 'READY';
     modelLabel.textContent = `Model: ${snapshot.aiStats.configuredModel} (${srcTag})`;
+  }
+  if (hudAiBadge) {
+    hudAiBadge.textContent = `✨ ${snapshot.aiStats.configuredModel} · ${srcTag}`;
   }
   if (callsLabel) {
     callsLabel.textContent = `AI Calls: ${snapshot.aiStats.callsUsed}/${snapshot.aiStats.maxCallsPerRoom}`;
@@ -138,11 +234,21 @@ function updateHeaderAndHud(snapshot: WorldSnapshot): void {
   if (revLabel) {
     revLabel.textContent = `Rev #${snapshot.revision}`;
   }
+  if (hudTraceCount) {
+    hudTraceCount.textContent = String(snapshot.traces.length);
+  }
   if (routeIndicator) {
     routeIndicator.textContent = `Active Route: ${GOAL_LABELS[snapshot.partyGoal]} → (${snapshot.partyDestination.x}, ${snapshot.partyDestination.y})`;
   }
   if (pauseBtn) {
     pauseBtn.textContent = snapshot.paused ? '▶️ Resume Walk' : '⏸️ Pause Walk';
+  }
+  if (diagModelInfo) {
+    diagModelInfo.textContent = `Model: ${snapshot.aiStats.configuredModel} (${srcTag}) · Calls Used: ${snapshot.aiStats.callsUsed}/${snapshot.aiStats.maxCallsPerRoom}`;
+  }
+  if (diagRoomInfo) {
+    const activeHumans = snapshot.humans.filter((h) => h.connected).length;
+    diagRoomInfo.textContent = `Room: ${snapshot.roomId} · Rev #${snapshot.revision} · Connected Villagers: ${activeHumans}`;
   }
 }
 
@@ -170,6 +276,10 @@ function renderLatestTraceCausalChain(trace: VerificationTrace): void {
   if (stepBelief) stepBelief.textContent = trace.causalChain.beliefUpdate;
   if (stepDelib) stepDelib.textContent = trace.causalChain.partyDeliberation;
   if (stepAction) stepAction.textContent = trace.causalChain.worldAction;
+
+  document.querySelectorAll('.causal-node').forEach((node) => {
+    node.classList.add('node-active');
+  });
 }
 
 function updateQuestAndInventory(snapshot: WorldSnapshot): void {
@@ -193,7 +303,6 @@ function updateQuestAndInventory(snapshot: WorldSnapshot): void {
 
   if (flagsRow) {
     const flags = [
-      { key: 'sealQuestKnown', label: 'Seal Quest Known', on: snapshot.quests.sealQuestKnown },
       {
         key: 'storehouseInvestigated',
         label: 'Storehouse Verified ✓',
@@ -201,17 +310,17 @@ function updateQuestAndInventory(snapshot: WorldSnapshot): void {
       },
       {
         key: 'wardBlessingActive',
-        label: 'Sacred Ward Active 🛡️',
+        label: 'Sacred Ward 🛡️',
         on: snapshot.quests.wardBlessingActive,
       },
       {
         key: 'rumorSuspected',
-        label: 'Marsh Rumor Disproven ✗',
+        label: 'Marsh Lie Disproven ✗',
         on: snapshot.quests.rumorSuspected,
         warn: true,
       },
       { key: 'caveVisited', label: 'Cave Entered', on: snapshot.quests.caveVisited },
-      { key: 'sealRecovered', label: 'Ancient Seal Recovered 🏆', on: snapshot.quests.sealRecovered },
+      { key: 'sealRecovered', label: 'Ancient Seal 🏆', on: snapshot.quests.sealRecovered },
       { key: 'questComplete', label: 'Quest Complete', on: snapshot.quests.questComplete },
     ];
 
@@ -227,13 +336,13 @@ function updateQuestAndInventory(snapshot: WorldSnapshot): void {
 
   if (invRow) {
     if (snapshot.inventory.length === 0) {
-      invRow.innerHTML = `<span class="sub-hint">Party Inventory: (Empty — items picked up along route appear here)</span>`;
+      invRow.innerHTML = `<span class="flag-pill">🎒 Party Bag: Empty (Inspect Storehouse for Relics)</span>`;
     } else {
       invRow.innerHTML = snapshot.inventory
         .map(
           (item) =>
             `<span class="inv-item" title="${escapeHtml(item.description)}">🎒 ${escapeHtml(item.name)}${
-              item.equippedBy ? ` [Equipped: ${item.equippedBy}]` : ''
+              item.equippedBy ? ` · ${item.equippedBy.toUpperCase()}` : ''
             }</span>`
         )
         .join('');
@@ -248,6 +357,8 @@ function updateAgentsGrid(snapshot: WorldSnapshot): void {
   grid.innerHTML = snapshot.actors
     .map((agent) => {
       const myTrust = myPlayerId && agent.trust[myPlayerId] !== undefined ? agent.trust[myPlayerId] : 0;
+      const attitude = getTrustAttitude(myTrust);
+      const hpPct = Math.max(0, Math.min(100, Math.round((agent.stats.hp / agent.stats.maxHp) * 100)));
       const latestMem = agent.memories[agent.memories.length - 1];
       const memStatusClass =
         latestMem?.verified === true
@@ -262,43 +373,99 @@ function updateAgentsGrid(snapshot: WorldSnapshot): void {
           ? '[DISPROVEN LIE ✗]'
           : '[UNVERIFIED CLAIM]';
 
+      const isSelected = agent.id === selectedHeroId;
+
       return `
-        <div class="agent-card" data-agent-card="${agent.id}">
-          <div class="agent-card-top">
-            <span class="agent-name">${escapeHtml(agent.name)} ${agent.thinking ? '💭' : ''}</span>
-            <span class="agent-role-tag">${agent.role} · Lv.${agent.stats.level} (${agent.stats.exp} XP)</span>
+        <div class="agent-card ${isSelected ? 'selected-hero' : ''}" data-agent-card="${agent.id}" data-agent-id="${agent.id}">
+          <div class="agent-card-header">
+            <div class="hero-portrait-box hero-portrait-${agent.role}">
+              ${HERO_PORTRAIT_SVGS[agent.id] || ''}
+              <span class="hero-lv-pill">Lv.${agent.stats.level}</span>
+            </div>
+            <div class="hero-identity">
+              <div class="agent-card-top">
+                <span class="agent-name">${escapeHtml(agent.name)} ${agent.thinking ? '💭' : ''}</span>
+                <span class="agent-role-tag">${agent.role} · ${agent.stats.exp} XP</span>
+              </div>
+              <div class="hero-bars-row">
+                <div class="hp-bar-wrap" title="Health Points">
+                  <div class="hp-bar-fill" style="width:${hpPct}%"></div>
+                  <div class="hp-bar-text">❤️ ${agent.stats.hp}/${agent.stats.maxHp}</div>
+                </div>
+                <span class="hero-stats-mini">⚔️${agent.stats.atk} 🛡️${agent.stats.def} 🔮${agent.stats.int}</span>
+              </div>
+            </div>
           </div>
-          <div class="agent-stats-line">
-            <span>❤️ HP ${agent.stats.hp}/${agent.stats.maxHp}</span>
-            <span>⚔️ ATK ${agent.stats.atk} · 🛡️ DEF ${agent.stats.def} · 🔮 INT ${agent.stats.int}</span>
+
+          <div class="hero-intent-trust-row">
+            <span class="intent-pill" title="Hero's current vote for party destination">
+              Vote: ${GOAL_SHORT_NAMES[agent.goalPreference] || agent.goalPreference}
+            </span>
+            <span class="trust-pill" style="color:${attitude.color}" title="Attitude & Trust score toward your villager NPC">
+              ${attitude.label} (${myTrust >= 0 ? '+' : ''}${myTrust})
+            </span>
           </div>
-          <div class="agent-meta-line">
-            <span>Vote: <strong style="color:#38bdf8">${agent.goalPreference}</strong></span>
-            <span>Trust in You: <strong style="color:${
-              myTrust > 0 ? '#34d399' : myTrust < 0 ? '#f87171' : '#cbd5e1'
-            }">${myTrust >= 0 ? '+' : ''}${myTrust}</strong></span>
-          </div>
+
           ${
             agent.equippedItem
-              ? `<div class="agent-meta-line"><span style="color:#fde68a">🗡️ Equipped: ${escapeHtml(
-                  agent.equippedItem
-                )}</span></div>`
+              ? `<div class="hero-intent-trust-row" style="border-color:#f59e0b; background:rgba(245,158,11,0.12)">
+                  <span style="color:#fde68a; font-weight:800">🗡️ Equipped Gear: ${escapeHtml(
+                    agent.equippedItem
+                  )}</span>
+                </div>`
               : ''
           }
+
           <div class="agent-speech-box">
-            "${escapeHtml(agent.lastSpeech || 'Ready to march.')}"
+            “${escapeHtml(agent.lastSpeech || 'Ready to march.')}”
           </div>
+
           ${
             latestMem
               ? `<div class="memory-item ${memStatusClass}">
-                  <strong>Memory ${memBadge}:</strong> ${escapeHtml(latestMem.claim)}
+                  <strong>${memBadge}:</strong> ${escapeHtml(latestMem.claim)}
                 </div>`
-              : ''
+              : `<div class="memory-item">
+                  <strong>Goal:</strong> ${escapeHtml(agent.personalGoal)}
+                </div>`
           }
         </div>
       `;
     })
     .join('');
+
+  // Allow clicking any hero card to target that hero for dialogue
+  grid.querySelectorAll('.agent-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      const agentId = card.getAttribute('data-agent-card') as ClassId | null;
+      if (!agentId) return;
+      selectHeroTarget(agentId, true);
+    });
+  });
+}
+
+function selectHeroTarget(agentId: ClassId, focusInput = false): void {
+  selectedHeroId = agentId;
+  const targetSelect = document.getElementById('target-agent-select') as HTMLSelectElement | null;
+  if (targetSelect) {
+    targetSelect.value = agentId;
+  }
+  if (latestSnapshot) {
+    const hero = latestSnapshot.actors.find((a) => a.id === agentId);
+    if (hero) {
+      updateDialogueFeedbackBanner(
+        hero.id,
+        `${hero.name} (${hero.role.toUpperCase()})`,
+        hero.personalGoal,
+        hero.lastSpeech || 'Speak, villager. What news do you bring?'
+      );
+    }
+    updateAgentsGrid(latestSnapshot);
+  }
+  if (focusInput) {
+    const chatInput = document.getElementById('chat-input') as HTMLInputElement | null;
+    chatInput?.focus();
+  }
 }
 
 function updateEventsAndTraces(snapshot: WorldSnapshot): void {
@@ -362,11 +529,52 @@ function escapeHtml(str: string): string {
     .replace(/"/g, '&quot;');
 }
 
+function activateDrawerTab(tabName: 'traces' | 'events' | 'diag' | 'dev'): void {
+  const tabs: Array<'traces' | 'events' | 'diag' | 'dev'> = ['traces', 'events', 'diag', 'dev'];
+  for (const name of tabs) {
+    const btn = document.getElementById(`tab-btn-${name}`);
+    const panel = document.getElementById(`tab-${name}`);
+    if (name === tabName) {
+      btn?.classList.add('active');
+      panel?.classList.remove('hidden');
+    } else {
+      btn?.classList.remove('active');
+      panel?.classList.add('hidden');
+    }
+  }
+}
+
 function initUiControls(): void {
   const chatForm = document.getElementById('chat-form') as HTMLFormElement | null;
   const chatInput = document.getElementById('chat-input') as HTMLInputElement | null;
   const targetSelect = document.getElementById('target-agent-select') as HTMLSelectElement | null;
   const playerNameInput = document.getElementById('player-name-input') as HTMLInputElement | null;
+
+  // Support URL query parameter ?name=... for multi-tab demos
+  const params = new URLSearchParams(window.location.search);
+  const nameFromUrl = params.get('name');
+  if (nameFromUrl && playerNameInput) {
+    playerNameInput.value = nameFromUrl.replace(/_/g, ' ');
+  }
+
+  // Initialize feedback portrait
+  const portraitEl = document.getElementById('feedback-portrait');
+  if (portraitEl) {
+    portraitEl.innerHTML = HERO_PORTRAIT_SVGS.mage;
+  }
+
+  // Onboarding guide controls
+  const onboardingBanner = document.getElementById('onboarding-banner');
+  document.getElementById('btn-dismiss-onboarding')?.addEventListener('click', () => {
+    onboardingBanner?.classList.add('hidden');
+  });
+  document.getElementById('btn-toggle-guide')?.addEventListener('click', () => {
+    onboardingBanner?.classList.toggle('hidden');
+  });
+
+  targetSelect?.addEventListener('change', () => {
+    selectHeroTarget((targetSelect.value as ClassId) || 'mage', false);
+  });
 
   playerNameInput?.addEventListener('change', () => {
     sendWsMessage({
@@ -401,8 +609,8 @@ function initUiControls(): void {
     btn.addEventListener('click', () => {
       const target = btn.getAttribute('data-target') as ClassId | null;
       const text = btn.getAttribute('data-text');
-      if (target && targetSelect) {
-        targetSelect.value = target;
+      if (target) {
+        selectHeroTarget(target, false);
       }
       if (text) {
         if (chatInput) chatInput.value = text;
@@ -467,24 +675,21 @@ function initUiControls(): void {
     }).catch((err) => console.error('Step error:', err));
   });
 
-  // Tabs
-  const tabBtnEvents = document.getElementById('tab-btn-events');
-  const tabBtnTraces = document.getElementById('tab-btn-traces');
-  const tabEvents = document.getElementById('tab-events');
-  const tabTraces = document.getElementById('tab-traces');
+  // Secondary Drawer Tabs & Collapse Toggle
+  document.getElementById('tab-btn-traces')?.addEventListener('click', () => activateDrawerTab('traces'));
+  document.getElementById('tab-btn-events')?.addEventListener('click', () => activateDrawerTab('events'));
+  document.getElementById('tab-btn-diag')?.addEventListener('click', () => activateDrawerTab('diag'));
+  document.getElementById('tab-btn-dev')?.addEventListener('click', () => activateDrawerTab('dev'));
 
-  tabBtnEvents?.addEventListener('click', () => {
-    tabBtnEvents.classList.add('active');
-    tabBtnTraces?.classList.remove('active');
-    tabEvents?.classList.remove('hidden');
-    tabTraces?.classList.add('hidden');
+  const drawerBody = document.getElementById('drawer-body');
+  document.getElementById('btn-toggle-drawer')?.addEventListener('click', () => {
+    drawerBody?.classList.toggle('collapsed');
   });
 
-  tabBtnTraces?.addEventListener('click', () => {
-    tabBtnTraces.classList.add('active');
-    tabBtnEvents?.classList.remove('active');
-    tabTraces?.classList.remove('hidden');
-    tabEvents?.classList.add('hidden');
+  document.getElementById('btn-open-inspector')?.addEventListener('click', () => {
+    drawerBody?.classList.remove('collapsed');
+    activateDrawerTab('traces');
+    document.getElementById('secondary-drawer')?.scrollIntoView({ behavior: 'smooth' });
   });
 }
 
@@ -522,10 +727,7 @@ function bootGame(): void {
       });
     },
     onSelectAgent: (agentId: ClassId) => {
-      const targetSelect = document.getElementById('target-agent-select') as HTMLSelectElement | null;
-      if (targetSelect) {
-        targetSelect.value = agentId;
-      }
+      selectHeroTarget(agentId, true);
     },
   });
 

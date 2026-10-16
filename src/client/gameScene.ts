@@ -352,10 +352,10 @@ export class RpgWorldScene extends Phaser.Scene {
         const w = Math.max(60, bounds.width + 10);
         const h = bounds.height + 6;
         vis.bubbleBg.clear();
-        vis.bubbleBg.fillStyle(0xffffff, 0.94);
-        vis.bubbleBg.lineStyle(1.5, 0x0284c7, 1);
-        vis.bubbleBg.fillRoundedRect(-w / 2, -26 - h, w, h, 5);
-        vis.bubbleBg.strokeRoundedRect(-w / 2, -26 - h, w, h, 5);
+        vis.bubbleBg.fillStyle(0xfef9e7, 0.96);
+        vis.bubbleBg.lineStyle(2, 0xd97706, 1);
+        vis.bubbleBg.fillRoundedRect(-w / 2, -26 - h, w, h, 6);
+        vis.bubbleBg.strokeRoundedRect(-w / 2, -26 - h, w, h, 6);
         vis.bubbleBg.setVisible(true);
       } else {
         vis.bubbleText?.setVisible(false);
