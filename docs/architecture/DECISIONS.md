@@ -32,3 +32,17 @@
 ## ADR-004: Single-instance Cloud Run topology
 - Status: accepted
 - A single container built via `Dockerfile` serves both the Vite-bundled Phaser client (`dist/client`) and the Express + `ws` server (`dist/server/index.js`) on `0.0.0.0:$PORT` (default `8080`), with `GET /healthz`, graceful `SIGTERM` handling, and `--max-instances 1` so in-memory multiplayer rooms remain consistent across connected browser tabs.
+
+## ADR-005: Multi-Dimensional Rhetorical Persuasion, Persona Voting & Trust Redemption (`feat/agent-gameplay`)
+- Status: accepted
+- Context: The initial MVP relied on narrow keyword matching in its offline fallback and lacked persona-specific rejection when a player pitched an argument that clashed with the addressed adventurer's values (e.g., pitching pure swamp greed to Sir Aldric), as well as a way for a distrusted speaker to redeem themselves or verify combat danger warnings.
+- Decision:
+  1. Implemented `analyzeHumanUtterance()` scoring 7 rhetorical dimensions (`tacticalDuty`, `empiricalLore`, `materialGain`, `compassionSafety`, `urgencyDirectness`, `sincereApology`, `suspiciousExaggeration`), indirect location/goal inference, competing villager detection, and direct action intents (`pickup`, `equip`, `interact`, `attack`).
+  2. Implemented `evaluatePersonaDeliberation()` producing authentic `4-0` unanimous, `3-1` majority, `2-2` split (`leader_tiebreak`), and `1-3` persona-mismatched rejection (`warrior_rejects_greedy_detour`) outcomes without changing `src/shared/contracts.ts`.
+  3. Added companion witness trust ripple (`40%`), probationary trust redemption (`probationary_redemption_clue`) verified upon reaching the Old Storehouse, `cave_danger` combat verification (`+20` trust and `-25%` incoming enemy damage), `poi_dawn_shrine` consecration (`interact`), and milestone travel banter.
+
+## ADR-006: Two-Stage Adaptive Thinking Retry & JSON Repair for `gemini-4-argon`
+- Status: accepted
+- Context: Under concurrent WebSocket/test load, `gemini-4-argon` requests configured with `ThinkingLevel.HIGH` occasionally exceed 15 seconds when allocating deep reasoning tokens.
+- Decision: Implemented a two-stage adaptive thinking call in `GeminiOrchestratorService` (`11.5s` primary attempt at `ThinkingLevel.HIGH`, followed by an immediate fast retry at `ThinkingLevel.LOW` before falling back to `evaluateOfflineDecision`), paired with `extractAndRepairJson()` and `normalizeParsedDecision()` to repair markdown fences, trailing commas, and partial fields.
+
